@@ -1,0 +1,222 @@
+import fs from "fs";
+import { jsPDF } from "jspdf";
+import nodemailer from "nodemailer";
+
+const apiUrl = `https://api.artic.edu/api/v1/artworks`;
+const currentDate = new Date().toDateString();
+const params = process.argv;
+const searchParam = params.indexOf("--email");
+const emailToSend = searchParam > -1 ? params[searchParam + 1] : null;
+
+const getUrlToFetch = () => {
+  let baseUrl = apiUrl;
+  const id = params.indexOf("--id");
+  const page = params.indexOf("--page");
+  const limit = params.indexOf("--limit");
+  const search = params.indexOf("--search");
+
+  if (id > -1) {
+    baseUrl += `/${params[id + 1]}`;
+  }
+
+  if (search > -1) {
+    baseUrl += `/search?q=${params[search + 1]}`;
+  }
+
+  if (page > -1 || limit > -1) {
+    baseUrl += `?`;
+  }
+
+  if (page > -1) {
+    baseUrl += `&page=${params[page + 1]}`;
+  }
+
+  if (limit > -1) {
+    baseUrl += `&limit=${params[limit + 1]}`;
+  }
+
+  return baseUrl;
+};
+
+const fetchArtworkData = async (ARTWORKS_API_URL) => {
+  try {
+    const response = await fetch(ARTWORKS_API_URL);
+    const json = await response.json();
+    return json;
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const generateJSON = (artworksData) => {
+  try {
+    fs.writeFileSync(
+      `./Report ${currentDate}.json`,
+      JSON.stringify(artworksData)
+    );
+    console.log("JSON report saved");
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const getImageFromURL = async (src) => {
+  const req = await fetch(src);
+  const res = await req.arrayBuffer();
+
+  const u8Buf = new Uint8Array(res);
+  let latinBuf = "";
+  u8Buf.forEach((byte) => {
+    latinBuf += String.fromCharCode(byte);
+  });
+
+  return `data:image/jpeg;base64,${btoa(latinBuf)}`;
+};
+
+const generatePDF = async (artworksData) => {
+  try {
+    const doc = new jsPDF();
+    const { data } = artworksData;
+    doc.setFontSize(22);
+    doc.setFont("courier", "normal");
+    doc.text("Artworks Report", 80, 20);
+    if (Array.isArray(data)) {
+      for (const art of data) {
+        const imageURL = `https://www.artic.edu/iiif/2/${art.image_id}/full/300,/0/default.jpg`;
+        const image = await getImageFromURL(imageURL);
+        const title = doc.splitTextToSize(art.title, 180);
+        const description = doc.splitTextToSize(art.thumbnail["alt_text"], 180);
+        const heightShift =
+          art.thumbnail.height > 8000
+            ? art.thumbnail.height / 100
+            : art.thumbnail.height / 50;
+        doc.setFontSize(14);
+        doc.text(`#${art.id}`, 20, 40);
+        doc.text(title, 20, 50);
+        doc.addImage(
+          image,
+          "JPEG",
+          20,
+          65,
+          art.thumbnail.width > 8000
+            ? art.thumbnail.width / 100
+            : art.thumbnail.width / 50,
+          art.thumbnail.height > 8000
+            ? art.thumbnail.height / 100
+            : art.thumbnail.height / 50
+        );
+        doc.text(art["date_display"] ?? "No date", 20, 80 + heightShift);
+        doc.text(
+          art["artist_display"]
+            ? art["artist_display"].split("\n")[0]
+            : "No artist",
+          20,
+          90 + heightShift
+        );
+        doc.text(
+          art["place_of_origin"] ?? "No origin place",
+          20,
+          100 + heightShift
+        );
+        doc.text(art["medium_display"] ?? "No medium", 20, 110 + heightShift);
+        doc.text(description ?? "No description", 20, 125 + heightShift);
+        doc.addPage();
+      }
+    } else {
+      const imageURL = `https://www.artic.edu/iiif/2/${data.image_id}/full/300,/0/default.jpg`;
+      const image = await getImageFromURL(imageURL);
+      const title = doc.splitTextToSize(data.title, 180);
+      const description = doc.splitTextToSize(data.thumbnail["alt_text"], 180);
+      const heightShift =
+        data.thumbnail.height > 8000
+          ? data.thumbnail.height / 100
+          : data.thumbnail.height / 50;
+      doc.setFontSize(14);
+      doc.text(`#${data.id}`, 20, 40);
+      doc.text(title, 20, 50);
+      doc.addImage(
+        image,
+        "JPEG",
+        20,
+        65,
+        data.thumbnail.width > 8000
+          ? data.thumbnail.width / 100
+          : data.thumbnail.width / 50,
+        data.thumbnail.height > 8000
+          ? data.thumbnail.height / 100
+          : data.thumbnail.height / 50
+      );
+      doc.text(data["date_display"] ?? "No date", 20, 80 + heightShift);
+      doc.text(
+        data["artist_display"]
+          ? data["artist_display"].split("\n")[0]
+          : "No artist",
+        20,
+        90 + heightShift
+      );
+      doc.text(
+        data["place_of_origin"] ?? "No origin place",
+        20,
+        100 + heightShift
+      );
+      doc.text(data["medium_display"] ?? "No medium", 20, 110 + heightShift);
+      doc.text(description ?? "No description", 20, 125 + heightShift);
+      doc.addPage();
+    }
+    doc.text("Document generated by a script", 60, 160);
+    doc.save(`Report ${currentDate}.pdf`);
+    console.log("PDF report saved");
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const sendEmail = async () => {
+  if (emailToSend) {
+    const transport = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 587,
+      auth: {
+        user: "jonathanbuitrago505@gmail.com",
+        pass: "ikel cnox qckr ehxd",
+      },
+    });
+    const mailOptions = {
+      from: {
+        name: "Jonathan Buitrago",
+        address: "jonathanbuitrago505@gmail.com",
+      },
+      to: emailToSend,
+      subject: `Artworks report for ${currentDate}`,
+      text: "Reports generated by Jonathan´s script",
+      attachments: [
+        {
+          filename: `Report ${currentDate}.json`,
+          path: `./Report ${currentDate}.json`,
+          contentType: "application/json",
+        },
+        {
+          filename: `Report ${currentDate}.pdf`,
+          path: `./Report ${currentDate}.pdf`,
+          contentType: "application/pdfs",
+        },
+      ],
+    };
+    try {
+      await transport.sendMail(mailOptions);
+      console.log("Email sent to", emailToSend);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+};
+
+const tasks = async () => {
+  const ARTWORKS_API_URL = getUrlToFetch();
+  const artworkData = await fetchArtworkData(ARTWORKS_API_URL);
+  generateJSON(artworkData);
+  await generatePDF(artworkData);
+  await sendEmail();
+};
+
+tasks();

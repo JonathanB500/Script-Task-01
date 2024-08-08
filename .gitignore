@@ -1,0 +1,3 @@
+node_modules/
+Report *.json
+Report *.pdf
